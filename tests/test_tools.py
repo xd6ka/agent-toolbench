@@ -64,8 +64,16 @@ def test_write_file_writes_and_refuses_protected_dirs(ws):
         write_file(ws, "db/shop.sqlite", "x")
 
 
-def test_call_tool_rejects_unknown_names_and_unexpected_args(ws):
+def test_call_tool_drops_unknown_args_but_reports_them(ws):
     with pytest.raises(ToolError, match="unknown tool"):
         call_tool(ws, "delete_file", {"path": "notes/alpha.txt"})
-    with pytest.raises(ToolError, match="unexpected arguments"):
-        call_tool(ws, "read_file", {"path": "notes/alpha.txt", "sudo": True})
+    # An invented argument must not cost the call: the tool runs, and the
+    # observation says which argument was ignored so the model can stop adding it.
+    hits = call_tool(ws, "search_text", {"query": "Hangzhou", "glob": "**/notes/*.txt"})
+    assert "notes/beta.txt:1" in hits
+    assert "ignored unsupported arguments: ['glob']" in hits
+    assert "search_text takes: query" in hits
+    # A call with only the invented argument has no required argument left and
+    # must still fail with the argument error, not silently do something else.
+    with pytest.raises(ToolError, match="bad arguments for search_text"):
+        call_tool(ws, "search_text", {"glob": "**/notes/*.txt"})

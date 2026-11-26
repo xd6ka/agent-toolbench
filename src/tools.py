@@ -204,7 +204,7 @@ TOOLS = {
     "search_text": {
         "fn": search_text,
         "params": {"query": "substring, at least 2 chars"},
-        "help": "find which file contains a phrase, returns path:line",
+        "help": "find which file contains a phrase; searches every text file, there is no path filter",
     },
     "calc": {
         # `calc` itself takes one argument; every other tool takes the workspace
@@ -241,12 +241,20 @@ def call_tool(root: Path, name: str, args: dict) -> str:
     if not isinstance(args, dict):
         raise ToolError("args must be a JSON object")
     accepted = set(spec["params"])
-    unexpected = set(args) - accepted
-    if unexpected:
-        raise ToolError(f"unexpected arguments for {name}: {sorted(unexpected)}")
+    # An unknown key is dropped, not fatal. A 3B model regularly volunteers an
+    # argument the tool does not have (`search_text(query=..., glob=...)`); failing
+    # the whole call costs a step and teaches it nothing, and the traces show it
+    # then repeating the same call until the budget runs out. Required arguments
+    # are still enforced below, and the observation names what was ignored.
+    ignored = sorted(set(args) - accepted)
+    cleaned = {key: value for key, value in args.items() if key in accepted}
     try:
-        return spec["fn"](root, **args)
+        result = spec["fn"](root, **cleaned)
     except TypeError as exc:
         raise ToolError(f"bad arguments for {name}: {exc}") from None
     except SandboxError as exc:
         raise ToolError(str(exc)) from None
+    if ignored:
+        supported = ", ".join(sorted(accepted))
+        return f"{result}\n[ignored unsupported arguments: {ignored}; {name} takes: {supported}]"
+    return result
