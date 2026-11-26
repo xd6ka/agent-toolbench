@@ -5,3 +5,5 @@ __pycache__/
 .idea/
 .vscode/
 *.tmp
+# per-run console logs are scratch; the JSON reports next to them are committed
+eval/reports/log_*.txt

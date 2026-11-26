@@ -75,10 +75,53 @@ def _safety_ok(workspace: Path, expect: dict, calls: list[dict]) -> bool:
     return True
 
 
+def _error_row(task: dict, exc: Exception) -> dict:
+    """A task whose run died is recorded, not dropped: one crash must not lose the run."""
+    return {
+        "id": task["id"],
+        "category": task["category"],
+        "question": task["question"],
+        "answer": None,
+        "status": "harness_error",
+        "steps": 0,
+        "seconds": 0.0,
+        "parse_errors": 0,
+        "prompt_tokens": 0,
+        "gen_tokens": 0,
+        "called": [],
+        "errors": [{"step": 0, "name": "-", "error": f"{type(exc).__name__}: {exc}"[:200]}],
+        "checks": {"answer": False, "file": False, "safety": True, "tools": False,
+                   "tools_full": False, "first_tool": False},
+        "flags": {
+            "safety_only": bool(task["expect"].get("safety_only")),
+            "safety_task": bool(task["expect"].get("forbid_tools") or task["expect"].get("forbid_path")),
+            "first_tool_scored": bool(task["expect"].get("first_tool")),
+            "expects_tools": bool(task["expect"].get("tools")),
+        },
+        "success": False,
+    }
+
+
+def run_task_safely(task: dict, *, keep: bool = False, model: str | None = None,
+                    retries: int = 1) -> dict:
+    """Run one task with a retry. A socket timeout on a slow CPU machine is not
+    a model failure and must not end a 41-task run half way through."""
+    last: Exception | None = None
+    for _ in range(retries + 1):
+        try:
+            return run_task(task, keep=keep, model=model)
+        except Exception as exc:  # noqa: BLE001 - the report records what happened
+            last = exc
+            print(f"RETRY {task['id']}: {type(exc).__name__}: {exc}")
+    return _error_row(task, last)
+
+
 def run_task(task: dict, *, keep: bool = False, model: str | None = None) -> dict:
     base = Path(tempfile.mkdtemp(prefix=f"agentbench_{task['id']}_"))
     workspace = base / "ws"
     build_workspace(workspace)
+    # agent.run records a transport failure itself (status `llm_error`, answer None);
+    # anything that still escapes is a harness bug and is retried by run_task_safely.
     result = agent.run(task["question"], workspace, model=model)
 
     calls = []
@@ -190,6 +233,7 @@ def main() -> int:
     parser.add_argument("--out", default="")
     parser.add_argument("--free-form", action="store_true", help="disable Ollama's JSON decoder")
     parser.add_argument("--shots", type=int, default=None, help="worked examples before the question")
+    parser.add_argument("--retries", type=int, default=1, help="retries per task after a harness error")
     args = parser.parse_args()
 
     if args.model:
@@ -204,7 +248,7 @@ def main() -> int:
     started = time.perf_counter()
     rows = []
     for task in tasks:
-        row = run_task(task, keep=args.keep, model=config.MODEL)
+        row = run_task_safely(task, keep=args.keep, model=config.MODEL, retries=args.retries)
         rows.append(row)
         mark = "OK " if row["success"] else "FAIL"
         print(f"{mark} {row['id']:4} {row['category']:9} steps={row['steps']} "

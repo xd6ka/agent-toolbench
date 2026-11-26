@@ -119,6 +119,19 @@ def extract_json(text: str) -> dict | None:
     return None
 
 
+def _chat(messages: list[dict], model: str | None) -> dict:
+    """One model call, with a single retry on a transport failure.
+
+    A CPU model occasionally stalls past the client timeout. Retrying once costs
+    one step and keeps a 41-task run from dying at task 32; a second failure is
+    left to the caller, which records it as a task-level error.
+    """
+    try:
+        return llm.chat(messages, model=model)
+    except Exception:
+        return llm.chat(messages, model=model)
+
+
 def run(
     question: str,
     workspace: Path,
@@ -139,7 +152,20 @@ def run(
     failures: dict[str, int] = {}
 
     for step in range(1, limit + 1):
-        reply = llm.chat(messages, model=model)
+        try:
+            reply = _chat(messages, model=model)
+        except Exception as exc:  # transport, not reasoning: never fake an answer
+            trace.append({"step": step, "action": None, "error": f"llm_call_failed: {exc}"})
+            return {
+                "answer": None,
+                "trace": trace,
+                "parse_errors": parse_errors,
+                "seconds": round(seconds, 2),
+                "prompt_tokens": prompt_tokens,
+                "gen_tokens": gen_tokens,
+                "steps": step,
+                "status": "llm_error",
+            }
         seconds += reply["seconds"]
         prompt_tokens += reply["prompt_tokens"] or 0
         gen_tokens += reply["gen_tokens"] or 0

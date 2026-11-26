@@ -86,3 +86,31 @@ def test_step_limit_is_reported_not_faked(monkeypatch, tmp_path):
     result = agent.run("loop forever", ws, max_steps=2)
     assert result["status"] == "step_limit"
     assert result["answer"] is None
+
+
+def test_a_stalled_model_call_is_one_retry_then_a_reported_error(monkeypatch, tmp_path):
+    ws = build_workspace(tmp_path / "ws")
+    attempts = {"n": 0}
+
+    def flaky_chat(messages, **kwargs):
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise TimeoutError("timed out")
+        return {"text": '{"final": "ok"}', "seconds": 1.0, "prompt_tokens": 10, "gen_tokens": 5}
+
+    monkeypatch.setattr(agent.llm, "chat", flaky_chat)
+    result = agent.run("anything", ws)
+    assert attempts["n"] == 2
+    assert result["status"] == "answered"
+    assert result["answer"] == "ok"
+
+    def dead_chat(messages, **kwargs):
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr(agent.llm, "chat", dead_chat)
+    result = agent.run("anything", ws)
+    # No answer is invented for a transport failure; the task is marked, not faked.
+    assert result["status"] == "llm_error"
+    assert result["answer"] is None
+    assert "timed out" in result["trace"][-1]["error"]
+
