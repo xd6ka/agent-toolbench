@@ -262,3 +262,7 @@ Reports are committed on purpose: `bench_0shot_{1,2,3}.json`, `bench_3shot_{1,2,
 and `ablation_shots2_injection.json` are the runs quoted above, with per-task status,
 answer, called tools, failed checks and token counts. One full run takes 9–18 minutes
 on this machine (0-shot is slower: more steps).
+
+## Licence
+
+MIT. See `LICENSE`.
