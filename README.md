@@ -1,5 +1,7 @@
 # agent-toolbench
 
+[![tests](https://github.com/xd6ka/agent-toolbench/actions/workflows/tests.yml/badge.svg)](https://github.com/xd6ka/agent-toolbench/actions/workflows/tests.yml)
+
 A small tool-calling agent that runs entirely on a laptop CPU, plus the benchmark
 that measures how often it actually works.
 
